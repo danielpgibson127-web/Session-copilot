@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Copilot</title>
+<style>
+/* v2 · Three columns: the session map in the middle (themes, goals, questions), Claude's next move on the right, transcript on the left. */
+:root{
+  --bg:#10161F; --panel:#172130; --panel2:#1D2A3D; --line:#2A3A52; --text:#D7DEE8; --muted:#8E9AAB;
+  --ink:#F2F5F9; --accent:#4DB8B2; --accent-ink:#0D1A1C; --accent-soft:#173238; --warn:#E9B45C; --good:#6CC28F; --bad:#E07A6E;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 var(--sans);display:flex;flex-direction:column}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--panel2);padding:8px 14px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button.rec{background:#5a2522;border-color:#8a3a33;color:#ffd9d4}
+button:disabled{opacity:.45;cursor:default}
+input,select,textarea{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hidden{display:none!important}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+header h1{font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 8px 0 0;font-weight:600}
+.pill{font-size:13px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 10px;white-space:nowrap}
+.pill b{color:var(--ink);font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);margin-right:6px;vertical-align:middle}
+.dot.on{background:var(--bad);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.spacer{flex:1}
+main{flex:1;display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.25fr) minmax(0,1fr);min-height:0}
+.col{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.col:last-child{border-right:none}
+.colhead{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 16px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+.scroll{flex:1;overflow:auto;padding:12px 16px}
+/* transcript */
+#transcript{font-size:13.5px}
+.line{margin:0 0 6px}
+.line time{font:12px var(--mono);color:var(--muted);margin-right:8px}
+.line.note{color:var(--warn)}
+.line.interim{color:var(--muted);font-style:italic}
+.notebar{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--line)}
+/* map */
+.goalline{font-size:14px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+.goalline b{color:var(--ink)}
+.theme{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:var(--panel)}
+.theme.now{border-color:var(--accent);background:var(--accent-soft)}
+.thead{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center;width:100%;padding:10px 12px}
+.thead:focus-visible{outline:2px solid var(--accent);border-radius:12px}
+.thead .t{font-weight:600;color:var(--ink)}
+.thead .w{font:12px var(--mono);color:var(--muted)}
+.chip{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;color:var(--accent-ink);background:var(--accent);border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:2px}
+.tbody{padding:0 12px 12px 42px;display:grid;gap:10px}
+.sub{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:4px}
+.qlist{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.qbtn{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:18px 1fr;gap:6px;width:100%;padding:4px 6px;border-radius:6px;font-size:14px;color:var(--text)}
+.qbtn:hover{background:var(--panel2)}
+.qbtn:focus-visible{outline:2px solid var(--accent)}
+.qbtn i{font-style:normal;color:var(--muted)}
+.qbtn.asked{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+.qbtn.asked i{color:var(--good)}
+.qbtn.opener{color:var(--ink);font-weight:600}
+.qbtn.suggested{background:#22403f;outline:1px solid var(--accent)}
+.tag{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--warn);border:1px solid #6b5420;border-radius:4px;padding:0 4px;margin-left:6px;vertical-align:1px}
+.must{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.must li{display:grid;grid-template-columns:18px 1fr;gap:6px;font-size:14px}
+.must li button{all:unset;cursor:pointer;text-align:center;font-weight:700}
+.st-missing b{color:var(--muted)} .st-thin b{color:var(--warn)} .st-covered b{color:var(--good)}
+.st-covered span{color:var(--muted)}
+.ev{color:var(--muted);font-style:italic}
+.listen{font-size:14px;color:var(--muted)}
+/* copilot */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.next{border-color:var(--accent)}
+.next .label{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.next .q{font-size:24px;line-height:1.3;color:var(--ink);margin:6px 0 8px;text-wrap:balance}
+.next.listening .q{font-size:18px;color:var(--text)}
+.next .why{color:var(--muted);font-size:14px}
+.next.fresh{animation:fresh 2.5s ease-out}
+@keyframes fresh{0%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
+.alt{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+.alt .sub{margin-bottom:2px}
+.flag{background:#3a2e14;border:1px solid #6b5420;color:#f3d79b;border-radius:10px;padding:10px 12px;font-size:14px;margin-top:12px}
+.meta{display:flex;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:12px}
+.err{color:var(--bad);font-size:14px}
+.empty{color:var(--muted);font-style:italic}
+/* setup overlay */
+#setup{position:fixed;inset:0;background:var(--bg);overflow:auto;z-index:20}
+.setupwrap{max-width:720px;margin:0 auto;padding:32px 20px 60px;display:grid;gap:18px}
+.setupwrap h2{margin:0;font-size:26px;color:var(--ink)}
+.setupwrap p{margin:0;color:var(--muted)}
+.field{display:grid;gap:6px}
+.field label{font-weight:600;color:var(--ink);font-size:14px}
+.field small{color:var(--muted)}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row>*{flex:1;min-width:180px}
+.sessions{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.sessions button{text-align:left;padding:12px}
+.sessions button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.sessions b{display:block;color:var(--ink)}
+.sessions span{font-size:13px;color:var(--muted)}
+textarea{min-height:120px;resize:vertical}
+.tips{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:14px}
+.tips ol{margin:6px 0 0;padding-left:20px}
+code{font:13px var(--mono);color:var(--ink)}
+@media (max-width:1180px){main{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) 30vh}.col.tx{grid-column:1 / -1;grid-row:2;border-right:none;border-top:1px solid var(--line)}}
+@media (max-width:760px){main{display:flex;flex-direction:column;overflow:auto}.col{border-right:none;border-bottom:1px solid var(--line);min-height:40vh}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+<section id="setup" aria-label="Session setup">
+  <div class="setupwrap">
+    <div>
+      <h2>Session Copilot</h2>
+      <p>Lays out the session map, listens to the conversation, and quietly suggests the next question.</p>
+    </div>
+    <div class="field">
+      <label for="packFile">Guide file</label>
+      <input id="packFile" type="file" accept=".json,application/json">
+      <small id="packNote"></small>
+    </div>
+    <div class="field">
+      <label>Who are you interviewing?</label>
+      <div class="sessions" id="sessionPick"></div>
+    </div>
+    <div id="customBox" class="hidden" style="display:grid;gap:12px">
+      <div class="row">
+        <div class="field"><label for="cName">Interviewee and role</label><input id="cName" placeholder="Jane Smith, VP Sales"></div>
+        <div class="field"><label for="cMin">Length (minutes)</label><input id="cMin" type="number" value="60" min="10" max="180"></div>
+      </div>
+      <div class="field"><label for="cGoal">Goal of the session, one line</label><input id="cGoal" placeholder="Leave with how the team really sells to specifiers"></div>
+      <div class="field"><label for="cKnown">What you already know</label><textarea id="cKnown" style="min-height:80px"></textarea></div>
+      <div class="field"><label for="cGuide">Themes</label>
+        <textarea id="cGuide" style="min-height:200px" placeholder="## Rep agencies | 5-20&#10;Goal: How agencies are paid for spec work&#10;Opener: Walk me through what an agency does for you in a month.&#10;- What incentives do they get today?&#10;- Which agency comes closest to what you want?&#10;&#10;## The team he'd build | 20-35&#10;..."></textarea>
+        <small>One block per theme: <code>## Title | start-end minutes</code>, then <code>Goal:</code> lines (each becomes a must-have), one <code>Opener:</code>, and <code>-</code> follow-ups.</small>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="apiKey">Claude API key</label><input id="apiKey" type="password" autocomplete="off" placeholder="sk-ant-..."><small>Stays in this browser only. Sent nowhere except to Claude.</small></div>
+      <div class="field"><label for="model">Model</label>
+        <select id="model">
+          <option value="claude-sonnet-5-5">Sonnet 5.5 (recommended)</option>
+          <option value="claude-haiku-5-5">Haiku 5.5 (faster, cheaper)</option>
+          <option value="claude-opus-5-5">Opus 5.5 (deepest, slowest)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label for="every">Suggest a question every</label>
+        <select id="every"><option value="30">30 seconds</option><option value="45" selected>45 seconds</option><option value="75">75 seconds</option><option value="0">Only when I ask</option></select>
+      </div>
+      <div class="field"><label for="lang">Language</label>
+        <select id="lang"><option value="en-US" selected>English (US)</option><option value="en-GB">English (UK)</option><option value="en-CA">English (Canada)</option></select>
+      </div>
+    </div>
+    <div class="tips">
+      <b>Before you start</b>
+      <ol>
+        <li>Use Chrome. Put the call on speaker in a quiet room, not headphones, so this device hears both of you.</li>
+        <li>Tell them: "I'm recording, and an AI assistant is taking notes for me."</li>
+        <li>Chrome will ask for the microphone once. Allow it.</li>
+        <li>Steer with the map in the middle. The suggestion on the right is a second opinion, not a script.</li>
+      </ol>
+    </div>
+    <p id="setupErr" class="err" role="alert"></p>
+    <div class="row"><button class="primary" id="begin" type="button" style="flex:0 0 auto">Open session</button><span id="resumeNote" class="empty" style="align-self:center"></span></div>
+  </div>
+</section>
+
+<header>
+  <h1>Session Copilot</h1>
+  <span class="pill" id="who"></span>
+  <span class="pill"><span class="dot" id="recDot"></span><b id="clock">0:00</b> / <span id="len"></span></span>
+  <span class="pill" id="block">Not started</span>
+  <span class="spacer"></span>
+  <button id="listen" class="primary" type="button">Start listening</button>
+  <button id="suggest" type="button" title="Shortcut: Ctrl+Enter">Suggest now</button>
+  <button id="export" type="button">Save transcript</button>
+  <button id="end" type="button">End session</button>
+</header>
+
+<main>
+  <section class="col tx" aria-label="Transcript">
+    <div class="colhead"><span>Transcript</span><span id="wordCount">0 words</span></div>
+    <div class="scroll" id="transcript" aria-live="off"><p class="empty" id="tEmpty">The conversation appears here as it's heard.</p></div>
+    <form class="notebar" id="noteForm">
+      <input id="note" placeholder="Quick note or paste from Teams, then Enter" autocomplete="off">
+      <button type="submit">Add</button>
+    </form>
+  </section>
+  <section class="col" aria-label="Session map">
+    <div class="colhead"><span>Session map</span><span id="mapCount"></span></div>
+    <div class="scroll" id="map"></div>
+  </section>
+  <section class="col" aria-label="Next move">
+    <div class="colhead"><span>Next move</span><span id="status">Waiting for the conversation</span></div>
+    <div class="scroll">
+      <div class="card next" id="nextCard">
+        <div class="label" id="nextLabel">Opener</div>
+        <div class="q" id="nextQ"></div>
+        <div class="why" id="nextWhy"></div>
+        <div class="alt hidden" id="altBox"><div class="sub" id="altLabel">Or</div><div id="altQ"></div></div>
+      </div>
+      <div class="flag hidden" id="flag"></div>
+      <div class="meta" id="meta"></div>
+      <p class="err" id="apiErr" role="alert"></p>
+    </div>
+  </section>
+</main>
+
+<script>
+(function(){
+"use strict";
+// Guides come from a guide file the interviewer loads; the page itself holds no client data.
+let PACK=null; try{ PACK=JSON.parse(localStorage.getItem("copilot-pack")||"null"); }catch(e){}
+let SHARED=[], PRESETS={};
+function applyPack(){ SHARED = PACK&&Array.isArray(PACK.shared) ? PACK.shared : []; PRESETS = Object.assign({}, PACK&&PACK.people?PACK.people:{}, {custom:{label:"Someone else", role:"Write or paste a guide", custom:true}}); }
+applyPack();
+
+const $ = s => document.querySelector(s);
+const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}}, del(k){try{localStorage.removeItem(k)}catch(e){}}};
+const KEY_STATE = "copilot-session-v3";
+let S=null, P=null, recog=null, wantListen=false, timer=null, ticker=null, busy=false, interimEl=null, sentWordMark=0;
+
+// ---------- guide model ----------
+function buildGuide(p){
+  // themes -> {title,start,end,must:[idx],qs:[{id,text,kind}],listen}
+  const must=[], themes=[];
+  p.themes.forEach((t,ti) => {
+    const [title,start,end,goals,opener,fus,shared,listen] = t;
+    const mIdx = goals.map(g => { must.push(g); return must.length-1; });
+    const qs = [];
+    if (opener) qs.push({id:`t${ti}.o`, text:opener, kind:"opener"});
+    (shared||[]).forEach(si => { if (p.useShared && SHARED[si] && SHARED[si]!==opener) qs.push({id:`s${si}`, text:SHARED[si], kind:"shared"}); else if (p.useShared && SHARED[si]===opener) qs[0].shared = si; });
+    fus.forEach((f,fi) => qs.push({id:`t${ti}.f${fi}`, text:f, kind:"follow"}));
+    themes.push({title,start,end,must:mIdx,qs,listen:listen||""});
+  });
+  return {label:p.label, role:p.role, minutes:p.minutes, company:p.company||"", goal:p.goal||"", known:p.known||"", useShared:!!p.useShared, themes, must};
+}
+function parseCustom(name, minutes, goal, known, text){
+  const blocks = text.split(/\n(?=##\s)/).map(b=>b.trim()).filter(b=>b.startsWith("##"));
+  const themes = blocks.map((b,i) => {
+    const lines=b.split("\n"); const head=lines[0].replace(/^##\s*/,"");
+    const [title, win] = head.split("|").map(s=>s.trim());
+    const m = (win||"").match(/(\d+)\s*[-–]\s*(\d+)/);
+    const goals=[], fus=[]; let opener="", listen="";
+    lines.slice(1).forEach(l => { l=l.trim(); if(/^goal:/i.test(l)) goals.push(l.replace(/^goal:\s*/i,"")); else if(/^opener:/i.test(l)) opener=l.replace(/^opener:\s*/i,"").replace(/^"|"$/g,""); else if(/^listen( for)?:/i.test(l)) listen=l.replace(/^listen( for)?:\s*/i,""); else if(/^[-*]\s+/.test(l)) fus.push(l.replace(/^[-*]\s+/,"").replace(/^"|"$/g,"")); });
+    return [title||`Theme ${i+1}`, m?+m[1]:0, m?+m[2]:minutes, goals, opener, fus, [], listen];
+  });
+  return {label:name, role:name, minutes, goal, known, themes, useShared:false};
+}
+
+// ---------- setup ----------
+let picked = Object.keys(PRESETS)[0];
+const pick = $("#sessionPick");
+function renderPick(){
+  pick.innerHTML="";
+  if(!PRESETS[picked]) picked=Object.keys(PRESETS)[0];
+  Object.entries(PRESETS).forEach(([id,p]) => {
+    const b=document.createElement("button"); b.type="button"; b.dataset.id=id;
+    const bb=document.createElement("b"); bb.textContent=p.label; const sp=document.createElement("span"); sp.textContent=p.custom?p.role:`${p.minutes} min · ${String(p.role||"").split(",")[0]}`;
+    b.append(bb,sp); b.addEventListener("click",()=>{picked=id;paintPick();}); pick.append(b);
+  });
+  $("#packNote").textContent = PACK ? `Loaded: ${PACK.name||"guide file"} (${Object.keys(PACK.people||{}).length} people). Stays in this browser.` : "No guide file loaded yet. Load one, or choose Someone else and write a guide.";
+  paintPick();
+}
+$("#packFile").addEventListener("change", e => {
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const d=JSON.parse(r.result); if(!d.people||typeof d.people!=="object") throw new Error("no people"); PACK=d; store.set("copilot-pack", JSON.stringify(d)); applyPack(); picked=Object.keys(d.people)[0]; renderPick(); $("#setupErr").textContent=""; }catch(err){ $("#setupErr").textContent="That file isn't a guide file. Use the .json guide file Claude made for you."; } };
+  r.readAsText(f);
+});
+function paintPick(){ pick.querySelectorAll("button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.id===picked)); $("#customBox").classList.toggle("hidden", picked!=="custom"); }
+renderPick();
+$("#apiKey").value = store.get("copilot-key")||"";
+$("#model").value = store.get("copilot-model")||"claude-sonnet-5-5";
+["cName","cMin","cGoal","cKnown","cGuide"].forEach(id=>{const v=store.get("copilot-"+id); if(v) $("#"+id).value=v;});
+try { const d=JSON.parse(store.get(KEY_STATE)||"null"); if(d && d.lines && d.lines.length){ $("#resumeNote").textContent=`An unsaved session with ${d.who} is still here. Opening it resumes where it stopped.`; picked=d.presetId||picked; paintPick(); } } catch(e){}
+
+$("#begin").addEventListener("click", () => {
+  const key=$("#apiKey").value.trim();
+  if(!key){ $("#setupErr").textContent="Add your Claude API key to get suggestions."; return; }
+  store.set("copilot-key",key); store.set("copilot-model",$("#model").value);
+  let raw = PRESETS[picked];
+  if (raw.custom){
+    const name=$("#cName").value.trim(), text=$("#cGuide").value.trim();
+    if(!name || !/##/.test(text)){ $("#setupErr").textContent="Add who you're interviewing and at least one theme starting with ##."; return; }
+    ["cName","cMin","cGoal","cKnown","cGuide"].forEach(id=>store.set("copilot-"+id,$("#"+id).value));
+    raw = parseCustom(name, Math.max(10,+$("#cMin").value||60), $("#cGoal").value.trim(), $("#cKnown").value.trim(), text);
+  }
+  P = buildGuide(raw);
+  let resumed=null; try{ const d=JSON.parse(store.get(KEY_STATE)||"null"); if(d && d.presetId===picked && d.lines.length) resumed=d; }catch(e){}
+  S = resumed || {presetId:picked, who:P.label, elapsedBefore:0, started:null, lines:[], log:[], coverage:{}, asked:{}, theme:0, pinned:null, next:null};
+  S.key=key; S.model=$("#model").value; S.every=+$("#every").value; S.lang=$("#lang").value;
+  $("#setup").classList.add("hidden");
+  $("#who").textContent=P.label; $("#len").textContent=`${P.minutes} min`;
+  if(!S.next){ const o=(P.themes[0]&&P.themes[0].qs[0])||{text:"Open with the guide's first question."}; S.next={mode:"ask", next_question:o.text, why:"The opener from the guide.", alternative:"", flag:"", qid:o.id}; }
+  renderLines(); renderMap(); renderNext(false); tick();
+  if(!window.SpeechRecognition && !window.webkitSpeechRecognition){ $("#listen").disabled=true; setStatus("This browser can't listen. Use Chrome, or paste the Teams transcript into the note box."); }
+});
+
+function persist(){ if(!S) return; const {key,...rest}=S; rest.elapsedBefore=elapsedSec(); rest.started=null; store.set(KEY_STATE, JSON.stringify(rest)); }
+
+// ---------- clock ----------
+function elapsedSec(){ return S ? S.elapsedBefore + (S.started?(Date.now()-S.started)/1000:0) : 0; }
+function fmt(sec){ const m=Math.floor(sec/60), s=Math.floor(sec%60); return `${m}:${String(s).padStart(2,"0")}`; }
+function clockTheme(min){ const i=P.themes.findIndex(t=>min>=t.start && min<t.end); return i<0 ? P.themes.length-1 : i; }
+function tick(){
+  if(!S) return; const sec=elapsedSec(); $("#clock").textContent=fmt(sec);
+  if(!(S.started||S.elapsedBefore)){ $("#block").textContent="Not started"; return; }
+  const ct=clockTheme(sec/60), t=P.themes[ct]; const left=Math.max(0, t.end - sec/60);
+  $("#block").textContent = sec/60 >= P.minutes ? "Over time" : `On the clock: ${t.title} · ${Math.ceil(left)} min left`;
+}
+
+// ---------- transcript ----------
+const tBox=$("#transcript");
+function addLine(text, kind){ text=text.trim(); if(!text) return; S.lines.push({t:Math.round(elapsedSec()), text, kind:kind||"heard"}); persist(); renderLine(S.lines[S.lines.length-1]); updateCount(); }
+function renderLine(l){
+  const e=$("#tEmpty"); if(e) e.remove();
+  const p=document.createElement("p"); p.className="line"+(l.kind==="note"?" note":"");
+  const tm=document.createElement("time"); tm.textContent=fmt(l.t); p.append(tm, document.createTextNode((l.kind==="note"?"Note: ":"")+l.text));
+  if(interimEl && interimEl.parentNode) tBox.insertBefore(p, interimEl); else tBox.append(p); stickBottom();
+}
+function renderLines(){ tBox.innerHTML=""; if(!S.lines.length) tBox.innerHTML='<p class="empty" id="tEmpty">The conversation appears here as it\'s heard.</p>'; S.lines.forEach(renderLine); updateCount(); }
+function stickBottom(){ if(tBox.scrollHeight-tBox.scrollTop-tBox.clientHeight<140) tBox.scrollTop=tBox.scrollHeight; }
+function words(){ return S.lines.reduce((n,l)=>n+l.text.split(/\s+/).length,0); }
+function updateCount(){ $("#wordCount").textContent=`${words().toLocaleString("en-US")} words`; }
+function setInterim(text){ if(!text){ if(interimEl){interimEl.remove(); interimEl=null;} return; } if(!interimEl){ interimEl=document.createElement("p"); interimEl.className="line interim"; tBox.append(interimEl);} interimEl.textContent=text; stickBottom(); }
+$("#noteForm").addEventListener("submit", e=>{ e.preventDefault(); const v=$("#note").value; if(!v.trim()) return; addLine(v, v.length>200?"heard":"note"); $("#note").value=""; });
+
+// ---------- map ----------
+const MARK={missing:"○", thin:"½", covered:"●"};
+function themeStatus(t){ if(!t.must.length) return t.qs.some(q=>S.asked[q.id]) ? "covered" : "missing"; const st=t.must.map(i=>(S.coverage[i]||{}).status||"missing"); return st.every(s=>s==="covered")?"covered":(st.some(s=>s!=="missing")?"thin":"missing"); }
+function activeTheme(){ return S.pinned!=null ? S.pinned : S.theme; }
+function renderMap(){
+  const m=$("#map"); m.innerHTML="";
+  const g=document.createElement("div"); g.className="goalline"; const gb=document.createElement("b"); gb.textContent="Where we're headed: "; g.append(gb, document.createTextNode(P.goal||"Cover the must-haves below.")); m.append(g);
+  const now=activeTheme(), sugg=S.next&&S.next.qid;
+  P.themes.forEach((t,ti) => {
+    const box=document.createElement("div"); box.className="theme"+(ti===now?" now":"");
+    const h=document.createElement("button"); h.className="thead"; h.type="button"; h.setAttribute("aria-expanded", ti===now);
+    const st=themeStatus(t); const ic=document.createElement("b"); ic.className="st-"+st; ic.style.textAlign="center"; ic.textContent=MARK[st]; ic.style.color = st==="covered"?"var(--good)":st==="thin"?"var(--warn)":"var(--muted)";
+    const tt=document.createElement("span"); tt.className="t"; tt.textContent=t.title; if(ti===now){ const c=document.createElement("span"); c.className="chip"; c.textContent=S.pinned!=null?"Here (set by you)":"Here"; tt.append(c); }
+    const w=document.createElement("span"); w.className="w"; w.textContent=`${t.start}–${t.end}`;
+    h.append(ic,tt,w);
+    h.addEventListener("click", ()=>{ S.pinned = (S.pinned===ti) ? null : ti; persist(); renderMap(); });
+    box.append(h);
+    if (ti===now || ti===S.open) {
+      const body=document.createElement("div"); body.className="tbody";
+      if (t.must.length){ const d=document.createElement("div"); const s=document.createElement("div"); s.className="sub"; s.textContent="Leave with"; const ul=document.createElement("ul"); ul.className="must";
+        t.must.forEach(i=>{ const c=S.coverage[i]||{status:"missing"}; const li=document.createElement("li"); li.className="st-"+c.status; const b=document.createElement("button"); b.type="button"; b.title="Mark covered or not"; const bb=document.createElement("b"); bb.textContent=MARK[c.status]; b.append(bb);
+          b.addEventListener("click",()=>{ S.coverage[i]= c.status==="covered"?{status:"missing",manual:true}:{status:"covered",manual:true,evidence:"marked by you"}; persist(); renderMap(); renderNext(false); });
+          const sp=document.createElement("span"); sp.textContent=P.must[i]; if(c.evidence){ const ev=document.createElement("span"); ev.className="ev"; ev.textContent=` · "${c.evidence}"`; sp.append(ev);} li.append(b,sp); ul.append(li); });
+        d.append(s,ul); body.append(d); }
+      const d2=document.createElement("div"); const s2=document.createElement("div"); s2.className="sub"; s2.textContent="Questions"; const ql=document.createElement("ul"); ql.className="qlist";
+      t.qs.forEach(q=>{ const li=document.createElement("li"); const b=document.createElement("button"); b.type="button"; b.className="qbtn"+(q.kind==="opener"?" opener":"")+(S.asked[q.id]?" asked":"")+(q.id===sugg?" suggested":"");
+        const i=document.createElement("i"); i.textContent=S.asked[q.id]?"✓":(q.kind==="opener"?"▸":"·"); const sp=document.createElement("span"); sp.textContent=q.text;
+        if(q.kind==="shared"||q.shared!=null){ const tg=document.createElement("span"); tg.className="tag"; tg.textContent="Shared"; sp.append(tg); }
+        b.append(i,sp); b.title="Click when asked"; b.addEventListener("click",()=>{ if(S.asked[q.id]) delete S.asked[q.id]; else S.asked[q.id]=true; persist(); renderMap(); renderNext(false); });
+        li.append(b); ql.append(li); });
+      d2.append(s2,ql); body.append(d2);
+      if (t.listen){ const l=document.createElement("div"); l.className="listen"; l.textContent="Listen for: "+t.listen; body.append(l); }
+      box.append(body);
+    }
+    m.append(box);
+  });
+  const covered=P.must.filter((x,i)=>(S.coverage[i]||{}).status==="covered").length;
+  $("#mapCount").textContent=`${covered} of ${P.must.length} covered`;
+}
+
+// ---------- listening ----------
+function makeRecog(){
+  const R=window.SpeechRecognition||window.webkitSpeechRecognition; const r=new R();
+  r.continuous=true; r.interimResults=true; r.lang=S.lang;
+  r.onresult=ev=>{ let interim=""; for(let i=ev.resultIndex;i<ev.results.length;i++){ const res=ev.results[i]; if(res.isFinal) addLine(res[0].transcript); else interim+=res[0].transcript; } setInterim(interim); };
+  r.onerror=ev=>{ if(ev.error==="not-allowed"||ev.error==="service-not-allowed"){ wantListen=false; setStatus("Microphone blocked. Allow it in Chrome's address bar, then press Start listening."); } else if(ev.error==="network") setStatus("Speech service unreachable. Retrying…"); else if(ev.error==="audio-capture"){ wantListen=false; setStatus("No microphone found."); } };
+  r.onend=()=>{ setInterim(""); if(wantListen) setTimeout(()=>{ try{ r.start(); }catch(e){} },300); else paintListen(); };
+  return r;
+}
+function paintListen(){ const b=$("#listen"); b.textContent= wantListen?"Pause":(S&&(S.started||S.elapsedBefore)?"Resume listening":"Start listening"); b.className= wantListen?"rec":"primary"; $("#recDot").classList.toggle("on",wantListen); }
+$("#listen").addEventListener("click", ()=>{
+  if(!wantListen){ if(!recog) recog=makeRecog(); wantListen=true; if(!S.started) S.started=Date.now(); try{recog.start();}catch(e){} if(!ticker) ticker=setInterval(()=>{tick(); followClock();},1000); scheduleAuto(); setStatus("Listening"); }
+  else { wantListen=false; try{recog.stop();}catch(e){} S.elapsedBefore=elapsedSec(); S.started=null; persist(); clearInterval(timer); timer=null; setStatus("Paused"); }
+  paintListen();
+});
+let lastClockTheme=-1;
+function followClock(){ // the map follows the clock only until Claude has placed the conversation
+  const ct=clockTheme(elapsedSec()/60); if(ct!==lastClockTheme){ lastClockTheme=ct; if(!S.log.length && S.pinned==null){ S.theme=ct; renderMap(); } }
+}
+function scheduleAuto(){ clearInterval(timer); timer=null; if(S.every>0) timer=setInterval(()=>{ if(words()-sentWordMark>=15) askClaude("auto"); }, S.every*1000); }
+
+// ---------- Claude ----------
+const SYSTEM=`You are a quiet interview copilot for an interviewer who is leading a live, recorded discovery interview. You never speak in the meeting; The interviewer glances at your screen. Be brief and exact.
+
+The transcript comes from speech recognition: no speaker labels, some misheard or missing words. The interviewer asks; the interviewee answers. Infer who is speaking from context. Lines marked "Note:" are the interviewer's typed notes.
+
+You get the session map: themes in order, each with its must-haves (what the interviewer must leave with), its questions (opener, follow-ups, shared questions) with ids, and what to listen for. The interviewer steers with the map; you are the second opinion that keeps him on the best path.
+
+First decide which theme the conversation is in now (by content, not the clock). The interviewer may take themes in any order or start somewhere else entirely: follow where the conversation actually is, never pull him back to a theme just because it comes first. Never suggest a question listed under "Passed on", and never suggest the same question more than twice. Then pick ONE next move, in this order:
+1. Clarify a contradiction with something said earlier ("Help me square that with...").
+2. Follow emphasis: if they showed energy (a long answer, a story, names or numbers unprompted, strong words, returning to a topic), go one level deeper (mechanism, a recent real example, what it costs) while the topic is still shallow.
+3. Probe a thin answer: a generic answer needs the last real instance, a number, or a definition. At most two probes on the same must-have in a row, then move on.
+4. Ask the next unasked question on the map that serves a must-have not yet covered, preferring the current theme; when the current theme's must-haves are covered or its time is up, move to the next theme's opener with a short bridge.
+5. Play back: when a theme's must-haves are covered, give the interviewer one sentence to say back ("So the thing that has to change is X, because Y. Fair?").
+If the interviewee is mid-answer and it's going well, use mode "listen": next_question = what to listen for (under 15 words), alternative = the question to ask when they finish.
+
+Question rules: one question, under 25 words, in the interviewee's own words, never yes/no, never leading, never two questions joined by "and" or "or". When a map question fits, use its exact words and give its id in qid; otherwise write a fresh probe and set qid to "". No product jargon. Never ask about pay or a colleague's performance.
+Time: with 15 minutes or less left, favor must-haves still missing; in the last 3 minutes, close with "What did I not ask that I should have?"
+
+Reply with JSON only:
+{"theme":0,"mode":"ask"|"listen"|"playback"|"close","next_question":"...","qid":"t1.f0" or "","why":"under 12 words","alternative":"...","flag":"one short flag or empty (contradiction, emphasis, differs from what we already know, avoided topic)","coverage":[{"i":0,"status":"missing"|"thin"|"covered","evidence":"their words, under 10 words"}],"asked":["t0.o","s1"]}
+coverage: one entry per must-have index. asked: ids of map questions already asked in substance (the interviewer's wording may differ).`;
+
+function guideBlock(){
+  let g=`INTERVIEW: ${P.label}${P.role&&P.role!==P.label?`, ${P.role}`:""}${P.company?` (${P.company})`:""}. Length: ${P.minutes} minutes.\nGOAL: ${P.goal}\nWHAT WE ALREADY KNOW: ${P.known}\n\nSESSION MAP:\n`;
+  P.themes.forEach((t,ti)=>{
+    g+=`\nTheme ${ti}: ${t.title} (${t.start}-${t.end} min)\n`;
+    if(t.must.length) g+="  Must-haves: "+t.must.map(i=>`[${i}] ${P.must[i]}`).join("; ")+"\n";
+    t.qs.forEach(q=>{ g+=`  ${q.id} (${q.kind}${q.shared!=null?", shared word for word":""}${q.kind==="shared"?", word for word":""}): ${q.text}\n`; });
+    if(t.listen) g+=`  Listen for: ${t.listen}\n`;
+  });
+  return g;
+}
+function dynamicBlock(reason){
+  const min=elapsedSec()/60;
+  const tx=S.lines.map(l=>`[${fmt(l.t)}] ${l.kind==="note"?"Note: ":""}${l.text}`).join("\n");
+  const last=S.log.slice(-3).map(x=>`- at ${fmt(x.t)} (${x.mode}): ${x.next_question}`).join("\n")||"none yet";
+  const cov=P.must.map((m,i)=>`${i}:${(S.coverage[i]||{}).status||"missing"}`).join(", ");
+  const asked=Object.keys(S.asked).join(", ")||"none";
+  const passed = Object.entries(S.sugg||{}).filter(([q,n])=>n>=2).map(([q])=>q);
+  const pin = S.pinned!=null ? `The interviewer has moved to theme ${S.pinned} (${P.themes[S.pinned].title}); suggest within it.` : "";
+  return `NOW: ${min.toFixed(1)} of ${P.minutes} minutes. On the clock: theme ${clockTheme(min)}. ${pin} ${reason==="manual"?"The interviewer asked for a suggestion now.":""}\nCoverage: ${cov}.\nAsked so far: ${asked}.\nPassed on (don't suggest again): ${passed.length?passed.join(" | "):"none"}.\nYour last suggestions:\n${last}\n\nTRANSCRIPT SO FAR:\n${tx||"(nothing heard yet)"}`;
+}
+function parseJSON(t){ const a=t.indexOf("{"), z=t.lastIndexOf("}"); if(a<0||z<0) throw new Error("No JSON in reply"); return JSON.parse(t.slice(a,z+1)); }
+async function askClaude(reason){
+  if(busy||!S) return; busy=true; $("#suggest").disabled=true; setStatus("Thinking…"); $("#apiErr").textContent="";
+  const mark=words();
+  const call = async () => {
+    const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(), 25000);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST", signal:ctl.signal,
+        headers:{"content-type":"application/json","x-api-key":S.key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:S.model,max_tokens:800,system:[{type:"text",text:SYSTEM,cache_control:{type:"ephemeral"}}],
+          messages:[{role:"user",content:[{type:"text",text:guideBlock(),cache_control:{type:"ephemeral"}},{type:"text",text:dynamicBlock(reason)}]}]})});
+      const body=await res.json().catch(()=>({}));
+      if(!res.ok) throw new Error(body&&body.error?`${body.error.type}: ${body.error.message}`:`HTTP ${res.status}`);
+      return parseJSON((body.content||[]).filter(c=>c.type==="text").map(c=>c.text).join(""));
+    } catch(e){ if(e.name==="AbortError") throw new Error("Claude took too long to answer"); throw e; }
+    finally{ clearTimeout(to); }
+  };
+  try{
+    let out;
+    try{ out=await call(); } catch(first){ setStatus("Retrying…"); await new Promise(r=>setTimeout(r,4000)); out=await call(); }
+    sentWordMark=mark;
+    (out.coverage||[]).forEach(c=>{ if(Number.isInteger(c.i)&&c.i>=0&&c.i<P.must.length){ const prev=S.coverage[c.i]; if(!(prev&&prev.manual)) S.coverage[c.i]={status:c.status,evidence:c.evidence||""}; } });
+    const ids=new Set(P.themes.flatMap(t=>t.qs.map(q=>q.id)));
+    (out.asked||[]).forEach(id=>{ if(ids.has(id)) S.asked[id]=true; });
+    if(Number.isInteger(out.theme)&&out.theme>=0&&out.theme<P.themes.length) S.theme=out.theme;
+    if(!ids.has(out.qid)) out.qid="";
+    if(out.mode!=="listen" && out.next_question && !(out.qid && S.asked[out.qid])){ S.sugg=S.sugg||{}; const k=out.next_question.trim(); S.sugg[k]=(S.sugg[k]||0)+1; }
+    S.next=out; S.log.push({t:Math.round(elapsedSec()),...out}); persist();
+    renderNext(true); renderMap(); setStatus(`Updated at ${fmt(elapsedSec())}`);
+  }catch(e){ $("#apiErr").textContent=`No suggestion this time: ${e.message}. It tries again at the next interval; the transcript is still being saved.`; setStatus("Suggestion failed"); }
+  finally{ busy=false; $("#suggest").disabled=false; }
+}
+$("#suggest").addEventListener("click",()=>askClaude("manual"));
+document.addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"&&S){ e.preventDefault(); askClaude("manual"); } });
+
+// ---------- next move ----------
+const LABEL={ask:"Ask next", listen:"Keep listening", playback:"Play it back", close:"Close the session"};
+function renderNext(fresh){
+  const n=S.next||{}; const listen=n.mode==="listen";
+  $("#nextLabel").textContent = S.log.length ? (LABEL[n.mode]||"Ask next") : "Opener";
+  $("#nextQ").textContent = listen ? (n.next_question||"").replace(/^listen for:\s*/i,"Listen for: ") : (n.next_question||"");
+  $("#nextWhy").textContent = n.why||"";
+  $("#nextCard").classList.toggle("listening", listen);
+  $("#altBox").classList.toggle("hidden", !n.alternative); $("#altLabel").textContent = listen ? "When they finish, ask" : "Or"; $("#altQ").textContent=n.alternative||"";
+  $("#flag").classList.toggle("hidden", !n.flag); $("#flag").textContent = n.flag ? "Flag: "+n.flag : "";
+  const card=$("#nextCard"); if(fresh){ card.classList.remove("fresh"); void card.offsetWidth; card.classList.add("fresh"); }
+  const covered=P.must.filter((m,i)=>(S.coverage[i]||{}).status==="covered").length;
+  const sharedAsked = P.useShared ? SHARED.filter((q,i)=>S.asked["s"+i] || P.themes.some(t=>t.qs.some(x=>x.shared===i && S.asked[x.id]))).length : 0;
+  const meta=$("#meta"); meta.innerHTML="";
+  [`${covered} of ${P.must.length} must-haves`, P.useShared?`${sharedAsked} of ${SHARED.length} shared asked`:"", `${S.log.length} suggestion${S.log.length===1?"":"s"}`].filter(Boolean).forEach(t=>{ const s=document.createElement("span"); s.className="pill"; s.textContent=t; meta.append(s); });
+}
+function setStatus(t){ $("#status").textContent=t; }
+
+// ---------- export / end ----------
+function exportFile(){
+  const day=new Date().toISOString().slice(0,10), slug=P.label.replace(/[^A-Za-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  let tx=`Session: ${P.label}${P.role&&P.role!==P.label?`, ${P.role}`:""}\nDate: ${day}\nLength: ${fmt(elapsedSec())}\nNote: speech-recognition transcript, no speaker labels; lines marked Note are the interviewer's own notes.\n\n`;
+  tx+=S.lines.map(l=>`[${fmt(l.t)}] ${l.kind==="note"?"Note: ":""}${l.text}`).join("\n");
+  tx+=`\n\n---\nCoverage at end:\n`+P.must.map((m,i)=>{const c=S.coverage[i]||{}; return `- ${c.status||"missing"}: ${m}${c.evidence?` ("${c.evidence}")`:""}`;}).join("\n");
+  tx+=`\n\nQuestions asked:\n`+P.themes.map(t=>`${t.title}\n`+t.qs.map(q=>`  - ${S.asked[q.id]?"asked":"not asked"}${q.kind==="shared"||q.shared!=null?" (shared)":""}: ${q.text}`).join("\n")).join("\n");
+  tx+=`\n\nSuggestions shown during the call:\n`+S.log.map(x=>`- [${fmt(x.t)}] ${x.mode||"ask"}: ${x.next_question}${x.alternative?` | then: ${x.alternative}`:""}${x.flag?` | flag: ${x.flag}`:""}`).join("\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([tx],{type:"text/plain"})); a.download=`${slug}-session-${day}.txt`; document.body.append(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},1000);
+  return a.download;
+}
+$("#export").addEventListener("click",()=>setStatus(`Saved ${exportFile()}`));
+let ended=false;
+$("#end").addEventListener("click",()=>{
+  if(ended){ store.del(KEY_STATE); location.reload(); return; }
+  if(wantListen) $("#listen").click();
+  const f=exportFile(); ended=true; setStatus(`Saved ${f}. Send it to Claude for the cross-check.`); $("#end").textContent="Clear and start over";
+});
+window.addEventListener("beforeunload", persist);
+})();
+</script>
+</body>
+</html>
